@@ -29,17 +29,27 @@ for (const [key, value] of Object.entries({ DISCORD_TOKEN, GUILD_ID, CHANNEL_ID 
 const commands = [
   new SlashCommandBuilder()
     .setName('등록')
-    .setDescription('아침 스크럼 알림 때 멘션할 사람을 등록해요')
-    .addUserOption((o) => o.setName('대상').setDescription('등록할 사람').setRequired(true)),
+    .setDescription('아침 스크럼 알림 때 멘션할 사람을 등록해요 (여러 명 가능)')
+    .addStringOption((o) =>
+      o.setName('대상').setDescription('등록할 사람들을 멘션하세요. 예: @김서연 @이민준').setRequired(true),
+    ),
   new SlashCommandBuilder()
     .setName('해제')
-    .setDescription('아침 스크럼 알림 대상에서 제외해요')
-    .addUserOption((o) => o.setName('대상').setDescription('제외할 사람').setRequired(true)),
+    .setDescription('아침 스크럼 알림 대상에서 제외해요 (여러 명 가능)')
+    .addStringOption((o) =>
+      o.setName('대상').setDescription('제외할 사람들을 멘션하세요. 예: @김서연 @이민준').setRequired(true),
+    ),
   new SlashCommandBuilder().setName('목록').setDescription('알림 받을 사람 목록을 보여줘요'),
   new SlashCommandBuilder().setName('테스트').setDescription('스크럼 알림을 지금 바로 보내봐요'),
 ].map((c) => c.toJSON());
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+/** "<@123> <@!456> 789" 같은 입력에서 유저 ID만 중복 없이 뽑아냄 */
+function parseUserIds(text) {
+  const ids = [...text.matchAll(/<@!?(\d{17,20})>|(?<![&#\d])\b(\d{17,20})\b/g)].map((m) => m[1] ?? m[2]);
+  return [...new Set(ids)];
+}
 
 async function sendReminder() {
   const members = listMembers();
@@ -75,15 +85,34 @@ client.on('interactionCreate', async (interaction) => {
 
   try {
     switch (interaction.commandName) {
-      case '등록': {
-        const user = interaction.options.getUser('대상', true);
-        if (user.bot) return reply('봇은 등록할 수 없어요.');
-        return reply(addMember(user.id) ? `✅ ${user}님을 등록했어요.` : `${user}님은 이미 등록되어 있어요.`);
-      }
-
+      case '등록':
       case '해제': {
-        const user = interaction.options.getUser('대상', true);
-        return reply(removeMember(user.id) ? `👋 ${user}님을 제외했어요.` : `${user}님은 등록되어 있지 않아요.`);
+        const ids = parseUserIds(interaction.options.getString('대상', true));
+        if (ids.length === 0) return reply('멘션된 사람이 없어요. `@이름`으로 멘션해서 입력해주세요.');
+
+        const isAdd = interaction.commandName === '등록';
+        const done = [];
+        const skipped = [];
+        const bots = [];
+
+        for (const id of ids) {
+          if (isAdd) {
+            const user = await client.users.fetch(id).catch(() => null);
+            if (!user) continue;
+            if (user.bot) {
+              bots.push(id);
+              continue;
+            }
+          }
+          (isAdd ? addMember(id) : removeMember(id)) ? done.push(id) : skipped.push(id);
+        }
+
+        const fmt = (list) => list.map((id) => `<@${id}>`).join(' ');
+        const lines = [];
+        if (done.length) lines.push(isAdd ? `✅ 등록했어요: ${fmt(done)}` : `👋 제외했어요: ${fmt(done)}`);
+        if (skipped.length) lines.push(isAdd ? `이미 등록되어 있어요: ${fmt(skipped)}` : `등록되어 있지 않아요: ${fmt(skipped)}`);
+        if (bots.length) lines.push(`봇은 등록할 수 없어요: ${fmt(bots)}`);
+        return reply(lines.join('\n') || '처리할 사람이 없어요.');
       }
 
       case '목록': {
