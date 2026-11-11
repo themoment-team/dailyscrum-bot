@@ -1,0 +1,16 @@
+# systemd 서비스 예시: /etc/systemd/system/dailyscrum-bot.service 로 복사 후 경로/유저 수정
+[Unit]
+Description=Daily Scrum Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/dailyscrum-bot
+ExecStart=/usr/bin/node --env-file=.env src/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
